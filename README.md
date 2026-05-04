@@ -70,7 +70,7 @@ python complete_analysis.py --input data/TGSIM_I395.csv --only figures
 ## Dataset
 
 **TGSIM I-395** — publicly available, CC0 license  
-🔗 [Download here](https://data.transportation.gov/Automobiles/Third-Generation-Simulation-Data-TGSIM-I-395-Traje/97n2-kuqi)
+🔗 [Download here] https://data.transportation.gov/Automobiles/Third-Generation-Simulation-Data-TGSIM-I-395-Traje/97n2-kuqi/about_data
 
 Place the CSV file at: `data/TGSIM_I395.csv`
 
