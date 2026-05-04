@@ -1,6 +1,6 @@
 # CAV-HDV Lane Merging Safety Analysis
 
-> **Paper:** Empirical Analysis of HDV Merging Safety in CAV-Adjacent Highway Zones: A Variational Bayesian and Offline Reinforcement Learning Framework  
+> **Paper:** Simulation-Free Offline Reinforcement Learning for CAV-HDV Highway Merge Safety Using Naturalistic Trajectory Data  
 > **Author:** Md Sifat Bin Siraj  
 > **Dataset:** TGSIM I-395, Washington D.C.
 
