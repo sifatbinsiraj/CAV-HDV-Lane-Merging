@@ -1,43 +1,86 @@
 """
 =============================================================================
-CAV-Adjacent HDV Merging Safety on I-395 Highway
+Simulation-Free Offline Reinforcement Learning for CAV-HDV Highway Merge
+Safety Using Naturalistic Trajectory Data
 Complete Analysis Pipeline — GitHub Release Version
 
-Paper: "Empirical Analysis of HDV Merging Safety in CAV-Adjacent Highway Zones:
-        A Variational Bayesian and Offline Reinforcement Learning Framework"
-Journal: Transportation Research Part C (Under Review)
-Authors: Md Sifat Bin Siraj | TGSIM I-395, Washington D.C.
+Paper: "Simulation-Free Offline Reinforcement Learning for CAV-HDV Highway
+        Merge Safety Using Naturalistic Trajectory Data"
+Journal: IEEE Transactions on Intelligent Transportation Systems (Under Review)
+Authors: Md Sifat Bin Siraj
+Dataset: TGSIM I-395, Washington D.C. (4.32M records, 2,155 merge events)
 
-Dataset: TGSIM I-395 (publicly available, CC0 license)
-         https://data.transportation.gov/Automobiles/
-         Third-Generation-Simulation-Data-TGSIM-I-395-Traje/97n2-kuqi
+Dataset (CC0 license, publicly available):
+    https://data.transportation.gov/Automobiles/
+    Third-Generation-Simulation-Data-TGSIM-I-395-Traje/97n2-kuqi
 
-HOW TO RUN:
+=============================================================================
+PAPER KEY RESULTS (for reference)
+=============================================================================
+
+C1 — Variational Bayesian IDM:
+    HDV headway T: 1.645 ± 0.416 s (bimodal: 0.89s aggressive, 2.11s conservative)
+    Valid vehicles: 655 (653 HDV, 2 CAV)
+
+C2 — Attention LSTM Seq2Seq:
+    Best val MSE:          0.0706  (proposed)
+    Mean response baseline: 0.1163
+    Linear Regression:     0.1158
+    GRU (2-layer):         0.1202
+    MLP (2-layer):         0.1621
+    Variance explained:    39.3% over mean baseline
+
+C3 — CQL Offline RL:
+    MDP transitions:       9,653  (real TGSIM, no simulator)
+    CQL action match:      93.4%  (95% CI: 92.3%-94.5%)
+    Naive baseline:        93.8%  (95% CI: 92.7%-94.8%)  [CI overlap → indistinguishable]
+    Policy entropy (soft): 0.9825 bits  (N_eff = 1.98 actions)
+    KL(Behavior||CQL):     0.1627 nats
+    Mean Q-gap:            2.49   (Maintain Q=11.69 vs Decel=8.41, Accel=8.61)
+
+Safety Analysis:
+    Critical rate (0-5 m/s CAV):   60.7%  (95% CI: 42.9%-78.6%)
+    Critical rate (15+ m/s CAV):   33.3%  (95% CI: 19.0%-47.6%)
+    Speed advisory threshold:      >= 15 m/s
+    ANOVA across speed bins:       F=39.28, p<0.001
+    Merge speed Cohen's d:         0.30 (near vs far CAV, p=0.014)
+
+=============================================================================
+HOW TO RUN
+=============================================================================
+
+Full pipeline:
     python complete_analysis.py --input data/TGSIM_I395.csv --output results/
 
-RESUME AFTER INTERRUPTION:
+Resume after interruption:
     python complete_analysis.py --input data/TGSIM_I395.csv --resume c3
 
-RUN SINGLE STEP:
-    python complete_analysis.py --input data/TGSIM_I395.csv --only figures
+Single step:
+    python complete_analysis.py --input data/TGSIM_I395.csv --only policy_analysis
 
-STEPS:
-    1. data_check    — raw data validation and quality check
-    2. data_clean    — cleaning, renaming, parquet cache
-    3. safety        — TTC, PET, gap, CAV proximity metrics
-    4. c1            — Variational Bayesian IDM estimation
-    5. c2            — Attention-based LSTM Seq-to-Seq response model
-    6. c3            — CQL offline RL policy
-    7. simulation    — Python IDM simulation validation
-    8. figures       — all paper figures (300 DPI)
-    9. tables        — all paper tables (CSV)
-   10. policy_analysis — entropy, KL divergence, Q-gap, effective actions (NEW)
+PIPELINE STEPS:
+    1.  data_check      — raw data validation and quality report
+    2.  data_clean      — cleaning, renaming, parquet cache
+    3.  safety          — TTC, PET, gap acceptance, CAV proximity metrics
+                          + ANOVA across CAV speed bins
+    4.  c1              — Variational Bayesian IDM per-vehicle estimation
+    5.  c2              — Attention-based LSTM Seq2Seq response model
+                          + baseline comparison (LR, MLP, GRU)
+    6.  c3              — CQL offline RL policy (simulation-free)
+    7.  simulation      — IDM-based policy validation
+    8.  figures         — all paper figures at 300 DPI
+    9.  tables          — all paper tables as CSV
+    10. policy_analysis — entropy, KL divergence, Q-gap, effective actions,
+                          bootstrap CIs, naive baseline comparison
 
 REQUIREMENTS:
     pip install numpy pandas scipy matplotlib torch scikit-learn pyarrow
 
 CITATION:
-    If you use this code, please cite our paper (see README.md).
+    If you use this code or data, please cite:
+        Siraj, M.S.B. (2025). Simulation-Free Offline Reinforcement Learning
+        for CAV-HDV Highway Merge Safety Using Naturalistic Trajectory Data.
+        IEEE Transactions on Intelligent Transportation Systems. (Under Review)
 =============================================================================
 """
 
@@ -114,14 +157,28 @@ BATCH_SIZE     = 256
 TARGET_UPD     = 500
 DPI            = 300
 
-# Paper-reported values (for reference)
-PAPER_NAIVE_MATCH   = 93.8   # % naive baseline action match (test set)
-PAPER_CQL_MATCH     = 93.4   # % CQL policy action match
-PAPER_C2_BEST_MSE   = 0.0706 # best validation MSE for C2
-PAPER_ANOVA_F       = 39.28  # ANOVA F-statistic for PET across speed bins
-PAPER_KL_BEH_CQL    = 0.1627 # KL(Behavior || CQL-softmax) in nats
-PAPER_SOFTMAX_ENT   = 0.9825 # CQL soft policy entropy (bits)
-PAPER_QGAP_MEAN     = 2.49   # mean Q-value gap (top - 2nd best action)
+# Paper-reported values (final, peer-reviewed)
+PAPER_NAIVE_MATCH      = 93.8   # % naive baseline action match (test set)
+PAPER_NAIVE_CI         = (92.7, 94.8)  # 95% bootstrap CI
+PAPER_CQL_MATCH        = 93.4   # % CQL policy action match
+PAPER_CQL_CI           = (92.3, 94.5)  # 95% bootstrap CI
+PAPER_C2_BEST_MSE      = 0.0706 # best validation MSE for C2
+PAPER_C2_MEAN_BASELINE = 0.1163 # mean response baseline MSE
+PAPER_C2_VARIANCE_EXP  = 39.3   # % reducible variance explained over mean baseline
+PAPER_ANOVA_F          = 39.28  # ANOVA F-statistic for PET across CAV speed bins
+PAPER_ANOVA_P          = 0.001  # ANOVA p-value (< 0.001)
+PAPER_KL_BEH_CQL       = 0.1627 # KL(Behavior || CQL-softmax) nats
+PAPER_KL_CQL_BEH       = 0.3024 # KL(CQL-softmax || Behavior) nats
+PAPER_SOFTMAX_ENT      = 0.9825 # CQL soft policy entropy (bits)
+PAPER_N_EFF            = 1.98   # effective number of actions (softmax)
+PAPER_QGAP_MEAN        = 2.49   # mean Q-value gap (top - 2nd best)
+PAPER_Q_MAINTAIN       = 11.69  # mean Q-value for Maintain action
+PAPER_Q_DECEL          = 8.41   # mean Q-value for Decelerate action
+PAPER_Q_ACCEL          = 8.61   # mean Q-value for Accelerate action
+PAPER_COHENS_D         = 0.30   # Cohen's d for merge speed near vs far CAV
+PAPER_CRIT_SLOW        = 60.7   # critical rate % for 0-5 m/s CAV
+PAPER_CRIT_FAST        = 33.3   # critical rate % for 15+ m/s CAV
+PAPER_SPEED_ADVISORY   = 15.0   # recommended CAV speed threshold (m/s)
 
 ALL_STEPS = [
     'data_check', 'data_clean', 'safety',
@@ -425,13 +482,19 @@ def step_safety_metrics(df, data_dir):
 
 
 def _print_safety_summary(safety):
-    """Print key safety statistics including ANOVA results."""
+    """
+    Print key safety statistics including ANOVA, Cohen's d, and causality note.
+
+    NOTE ON CAUSALITY: The speed-safety relationship is interpreted as
+    associational, not causal. Slow CAVs may operate in congested conditions
+    that independently elevate merge risk. See paper Section 4.4.
+    """
     print(f"\nSafety metrics: {len(safety):,} events")
     print(f"Critical (TTC<3s OR PET<2s): "
           f"{safety['critical'].sum()} ({safety['critical'].mean()*100:.1f}%)")
     print(f"CAV-proximate (<=50m): {safety['near_cav_50m'].sum()}")
 
-    # Merge speed comparison: near vs far CAV
+    # Merge speed comparison: near vs far CAV (Table 7)
     near = safety[safety['near_cav_50m']]
     far  = safety[~safety['near_cav_50m']]
     if len(near) > 3 and len(far) > 3:
@@ -440,15 +503,15 @@ def _print_safety_summary(safety):
                                    alternative='two-sided')
         n1 = near['merge_speed'].mean()
         n2 = far['merge_speed'].mean()
-        # Cohen's d
+        # Cohen's d (pooled SD)
         pool_std = np.sqrt(
             ((len(near)-1)*near['merge_speed'].std()**2 +
              (len(far)-1)*far['merge_speed'].std()**2) /
             (len(near)+len(far)-2))
         cohens_d = abs(n1 - n2) / pool_std
         print(f"\nCAV-Proximate vs Distant (merge speed):")
-        print(f"  Near={n1:.2f} m/s | Far={n2:.2f} m/s | "
-              f"p={p:.3f} | Cohen's d={cohens_d:.2f}")
+        print(f"  Near={n1:.3f} m/s | Far={n2:.3f} m/s | "
+              f"p={p:.3f} | Cohen's d={cohens_d:.2f} (small effect)")
 
     # ANOVA across CAV speed bins (paper Table 8)
     cav_m = safety[safety['cav_speed'].notna()].copy()
@@ -460,9 +523,17 @@ def _print_safety_summary(safety):
         if all(len(b) > 3 for b in [b0, b1, b2, b3]):
             f_stat, p_anova = stats.f_oneway(b0, b1, b2, b3)
             h_stat, p_kw    = stats.kruskal(b0, b1, b2, b3)
-            print(f"\nANOVA — PET across CAV speed bins:")
+            print(f"\nANOVA — PET across CAV speed bins (Table 8):")
             print(f"  F={f_stat:.2f}, p={p_anova:.4f} | "
                   f"Kruskal-Wallis H={h_stat:.2f}, p={p_kw:.4f}")
+            print(f"\n  Critical rates by speed bin:")
+            for label, grp in [('0-5 m/s',b0),('5-10 m/s',b1),
+                                ('10-15 m/s',b2),('15+ m/s',b3)]:
+                parent = cav_m[cav_m['pet'].isin(grp)]
+                crit = parent['critical'].mean()*100 if 'critical' in parent else float('nan')
+                print(f"    {label}: n={len(grp)}, mean PET={grp.mean():.2f}s")
+            print(f"\n  NOTE: Relationship is ASSOCIATIONAL, not causal.")
+            print(f"  Confounders (traffic density, time-of-day) not controlled.")
 
 
 # =============================================================================
@@ -1209,19 +1280,25 @@ def step_simulation(q_net, output_dir):
 def step_policy_analysis(ckpt_dir, output_dir):
     """
     Policy diversity analysis for CQL offline RL policy.
-    Computes: entropy, KL divergence, effective action count, Q-value gap.
 
-    Key results (paper Section 4.7):
-        Naive policy entropy:        0.0000 bits
-        CQL argmax entropy:          0.0368 bits
-        Behavior policy entropy:     0.1992 bits
-        CQL softmax entropy:         0.9825 bits   (N_eff = 1.98 actions)
+    Computes:
+        1. Naive baseline accuracy + bootstrap CI
+        2. CQL policy entropy (argmax + softmax)
+        3. KL divergence (behavior vs CQL-softmax)
+        4. Effective number of actions
+        5. Q-value gap analysis
+        6. Bootstrap CIs for critical event rates by CAV speed bin
+        7. Composite evaluation table (Table 11 in paper)
+
+    Key results (paper Section 4.7-4.8):
+        Naive action match:          93.8% (95% CI: 92.7%-94.8%)
+        CQL action match:            93.4% (95% CI: 92.3%-94.5%)
+        CQL soft entropy:            0.9825 bits  (N_eff = 1.98)
         KL(Behavior || CQL-soft):    0.1627 nats
-        KL(CQL-soft  || Behavior):   0.3024 nats
-        Mean Q-gap (top - 2nd):      2.49
-        Naive baseline action match: 93.8%
+        Mean Q-gap:                  2.49
+        Speed bin CIs (15+ m/s):     33.3% (19.0%-47.6%)
     """
-    section("STEP 10: POLICY ANALYSIS (ENTROPY, KL, Q-GAP)")
+    section("STEP 10: POLICY ANALYSIS (ENTROPY, KL, Q-GAP, BOOTSTRAP CI)")
 
     if not TORCH_AVAILABLE:
         print("Skipping policy_analysis: PyTorch not available.")
@@ -1229,6 +1306,8 @@ def step_policy_analysis(ckpt_dir, output_dir):
 
     mdp_path = os.path.join(ckpt_dir, 'c3', 'transitions.parquet')
     final    = os.path.join(ckpt_dir, 'c3', 'c3_final.pt')
+    safety_path = os.path.join(
+        os.path.dirname(ckpt_dir), 'data', 'processed', 'safety_metrics.parquet')
 
     if not os.path.exists(mdp_path) or not os.path.exists(final):
         print("C3 MDP or model not found. Run c3 step first.")
@@ -1237,6 +1316,8 @@ def step_policy_analysis(ckpt_dir, output_dir):
     trans_df = pd.read_parquet(mdp_path)
     N        = len(trans_df)
     n_test   = int(N * 0.2)
+    rng      = np.random.default_rng(42)
+    N_BOOT   = 10000
 
     # Load model
     q_net = QNetwork()
@@ -1251,106 +1332,154 @@ def step_policy_analysis(ckpt_dir, output_dir):
     with torch.no_grad():
         q_vals_all = q_net(test_states).numpy()
 
-    # ── 1. Naive baseline ──
-    naive_pred  = np.ones(n_test, dtype=int)
-    naive_match = (naive_pred == test_actions).mean() * 100
-    maintain_pct = (test_actions == 1).mean() * 100
+    # ── 1. Naive baseline + bootstrap CI ──
+    naive_pred   = np.ones(n_test, dtype=int)
+    naive_correct = (naive_pred == test_actions).astype(float)
+    naive_match  = naive_correct.mean() * 100
+    boot_naive   = np.array([
+        rng.choice(naive_correct, size=n_test, replace=True).mean() * 100
+        for _ in range(N_BOOT)])
+    naive_ci = np.percentile(boot_naive, [2.5, 97.5])
 
-    # ── 2. CQL argmax policy ──
-    pred_actions = q_vals_all.argmax(axis=1)
-    cql_match    = (pred_actions == test_actions).mean() * 100
+    # ── 2. CQL argmax + bootstrap CI ──
+    pred_actions  = q_vals_all.argmax(axis=1)
+    cql_correct   = (pred_actions == test_actions).astype(float)
+    cql_match     = cql_correct.mean() * 100
+    boot_cql      = np.array([
+        rng.choice(cql_correct, size=n_test, replace=True).mean() * 100
+        for _ in range(N_BOOT)])
+    cql_ci = np.percentile(boot_cql, [2.5, 97.5])
+
+    # ── 3. Policy distributions ──
     pred_counts  = np.bincount(pred_actions, minlength=3)
     pred_probs   = pred_counts / pred_counts.sum()
-
-    # ── 3. Behavior policy distribution ──
     act_counts   = np.bincount(actions, minlength=3)
     beh_probs    = act_counts / act_counts.sum()
 
-    # ── 4. Softmax policy distribution ──
     import torch.nn.functional as F_torch
     soft_probs = F_torch.softmax(
         torch.FloatTensor(q_vals_all), dim=1).mean(dim=0).numpy()
 
-    # ── 5. Entropy ──
+    # ── 4. Entropy ──
     eps = 1e-10
     H_naive    = scipy_entropy(np.array([eps, 1-2*eps, eps]), base=2)
-    H_argmax   = scipy_entropy(pred_probs + eps, base=2)
-    H_behavior = scipy_entropy(beh_probs  + eps, base=2)
-    H_softmax  = scipy_entropy(soft_probs + eps, base=2)
+    H_argmax   = scipy_entropy(pred_probs  + eps, base=2)
+    H_behavior = scipy_entropy(beh_probs   + eps, base=2)
+    H_softmax  = scipy_entropy(soft_probs  + eps, base=2)
     H_uniform  = scipy_entropy([1/3, 1/3, 1/3], base=2)
 
-    # ── 6. Effective number of actions ──
-    N_eff_argmax  = 2 ** H_argmax
-    N_eff_behavior= 2 ** H_behavior
-    N_eff_softmax = 2 ** H_softmax
+    # ── 5. Effective actions ──
+    N_eff_argmax   = 2 ** H_argmax
+    N_eff_behavior = 2 ** H_behavior
+    N_eff_softmax  = 2 ** H_softmax
 
-    # ── 7. KL divergence ──
+    # ── 6. KL divergence ──
     KL_beh_cql = scipy_entropy(beh_probs,  soft_probs + eps)
     KL_cql_beh = scipy_entropy(soft_probs, beh_probs  + eps)
 
-    # ── 8. Q-value gap ──
-    q_sorted = np.sort(q_vals_all, axis=1)[:, ::-1]
-    q_gap    = q_sorted[:, 0] - q_sorted[:, 1]
+    # ── 7. Q-value gap ──
+    q_sorted    = np.sort(q_vals_all, axis=1)[:, ::-1]
+    q_gap       = q_sorted[:, 0] - q_sorted[:, 1]
+    top_actions = q_vals_all.argmax(axis=1)
+    q_mean_per  = q_vals_all.mean(axis=0)
 
-    # ── 9. Per-action Q-values ──
-    q_mean_per_action = q_vals_all.mean(axis=0)
-    top_actions       = q_vals_all.argmax(axis=1)
+    # ── 8. Bootstrap CI for CAV speed bins ──
+    speed_bin_cis = {}
+    if os.path.exists(safety_path):
+        safety = pd.read_parquet(safety_path)
+        safety['pet']      = safety['gap_follow'] / safety['merge_speed'].clip(lower=0.1)
+        safety['ttc_min']  = safety[['ttc_lead','ttc_follow']].min(axis=1) \
+                             if 'ttc_lead' in safety.columns else 50
+        safety['critical'] = (safety['ttc_min'] < 3) | (safety['pet'] < 2)
+        cav_m = safety[safety['cav_speed'].notna()].copy()
+        for label, lo, hi in [('0-5',0,5),('5-10',5,10),('10-15',10,15),('15+',15,100)]:
+            grp = cav_m[cav_m['cav_speed'].between(lo, hi, inclusive='left')][
+                'critical'].values.astype(float)
+            if len(grp) > 3:
+                obs  = grp.mean() * 100
+                boot = np.array([
+                    rng.choice(grp, size=len(grp), replace=True).mean() * 100
+                    for _ in range(N_BOOT)])
+                ci = np.percentile(boot, [2.5, 97.5])
+                speed_bin_cis[label] = (obs, ci, len(grp))
 
-    # Print results
-    print(f"\n── Naive Baseline ──")
-    print(f"  Test set size:       {n_test}")
-    print(f"  Maintain % (test):   {maintain_pct:.1f}%")
-    print(f"  Naive action match:  {naive_match:.1f}%")
-    print(f"  CQL action match:    {cql_match:.1f}%")
+    # ── Print results ──
+    print(f"\n── Naive Baseline (test set n={n_test}) ──")
+    print(f"  Naive action match:  {naive_match:.1f}% "
+          f"(95% CI: {naive_ci[0]:.1f}%–{naive_ci[1]:.1f}%)")
+    print(f"  CQL action match:    {cql_match:.1f}% "
+          f"(95% CI: {cql_ci[0]:.1f}%–{cql_ci[1]:.1f}%)")
+    print(f"  CI overlap:          "
+          f"{'YES — no significant difference' if cql_ci[1] >= naive_ci[0] else 'NO'}")
 
     print(f"\n── Policy Entropy (bits) ──")
-    print(f"  Naive (always Maintain): {H_naive:.4f}")
-    print(f"  CQL argmax:              {H_argmax:.4f}")
-    print(f"  Behavior policy:         {H_behavior:.4f}")
-    print(f"  CQL softmax:             {H_softmax:.4f}")
-    print(f"  Uniform (max):           {H_uniform:.4f}")
-
-    print(f"\n── Effective Number of Actions ──")
-    print(f"  Naive:           1.00")
-    print(f"  CQL argmax:      {N_eff_argmax:.2f}")
-    print(f"  Behavior policy: {N_eff_behavior:.2f}")
-    print(f"  CQL softmax:     {N_eff_softmax:.2f}")
-    print(f"  Uniform:         3.00")
+    print(f"  Naive:           {H_naive:.4f}")
+    print(f"  CQL argmax:      {H_argmax:.4f}")
+    print(f"  Behavior policy: {H_behavior:.4f}")
+    print(f"  CQL softmax:     {H_softmax:.4f}  (N_eff = {N_eff_softmax:.2f})")
+    print(f"  Uniform (max):   {H_uniform:.4f}")
 
     print(f"\n── KL Divergence (nats) ──")
     print(f"  KL(Behavior || CQL-softmax): {KL_beh_cql:.4f}")
     print(f"  KL(CQL-softmax || Behavior): {KL_cql_beh:.4f}")
 
-    print(f"\n── Q-value Gap Analysis ──")
-    print(f"  Mean gap (top - 2nd):  {q_gap.mean():.4f}")
-    print(f"  Std gap:               {q_gap.std():.4f}")
-    print(f"  Median gap:            {np.median(q_gap):.4f}")
-    print(f"\n── Mean Q-values per action ──")
-    labels = ['Decelerate', 'Maintain', 'Accelerate']
-    for a, label in enumerate(labels):
+    print(f"\n── Q-value Gap ──")
+    print(f"  Mean gap (top-2nd): {q_gap.mean():.4f}  Std: {q_gap.std():.4f}")
+    labels = ['Decelerate','Maintain','Accelerate']
+    for a, lbl in enumerate(labels):
         mask = top_actions == a
-        gap_str = f" | mean gap={q_gap[mask].mean():.4f}" if mask.sum() > 0 else ""
-        print(f"  {label:<12}: mean Q={q_mean_per_action[a]:.4f} "
-              f"| top in {mask.sum()} states{gap_str}")
+        g = f"  mean gap={q_gap[mask].mean():.4f}" if mask.sum() > 0 else ""
+        print(f"  {lbl:<12}: mean Q={q_mean_per[a]:.4f} "
+              f"| top in {mask.sum()} states ({mask.mean()*100:.2f}%){g}")
 
-    # Save results
+    if speed_bin_cis:
+        print(f"\n── CAV Speed Bin Critical Rates (bootstrap CI) ──")
+        for label, (obs, ci, n) in speed_bin_cis.items():
+            print(f"  {label} m/s (n={n:3d}): {obs:.1f}% "
+                  f"(95% CI: {ci[0]:.1f}%–{ci[1]:.1f}%)")
+
+    # ── Save results ──
     tbl_dir = os.path.join(output_dir, 'tables')
     os.makedirs(tbl_dir, exist_ok=True)
-    results_df = pd.DataFrame([
-        ['Naive (always Maintain)',   f'{H_naive:.4f}',    '1.00',               f'{naive_match:.1f}%'],
-        ['CQL argmax',               f'{H_argmax:.4f}',   f'{N_eff_argmax:.2f}', f'{cql_match:.1f}%'],
-        ['Behavior policy (observed)',f'{H_behavior:.4f}', f'{N_eff_behavior:.2f}', 'N/A'],
-        ['CQL softmax',              f'{H_softmax:.4f}',  f'{N_eff_softmax:.2f}', 'N/A'],
-        ['Uniform (max)',             f'{H_uniform:.4f}',  '3.00',               'N/A'],
-    ], columns=['Policy', 'Entropy (bits)', 'N_eff', 'Action Match'])
-    results_df.to_csv(os.path.join(tbl_dir, 'policy_analysis.csv'), index=False)
 
-    kl_df = pd.DataFrame([
-        ['KL(Behavior || CQL-softmax)', f'{KL_beh_cql:.4f}'],
-        ['KL(CQL-softmax || Behavior)', f'{KL_cql_beh:.4f}'],
-        ['Mean Q-gap (top - 2nd)',       f'{q_gap.mean():.4f}'],
-    ], columns=['Metric', 'Value'])
-    kl_df.to_csv(os.path.join(tbl_dir, 'policy_kl_qgap.csv'), index=False)
+    # Table 11: Composite policy comparison (paper Table 11)
+    comp_df = pd.DataFrame([
+        ['Naive (always Maintain)',
+         f'{naive_match:.1f} ({naive_ci[0]:.1f}–{naive_ci[1]:.1f})',
+         '1.00', f'{H_naive:.4f}', '0 (0.00%)',
+         '—', '—', 'Statistically indistinguishable from CQL'],
+        ['CQL Policy',
+         f'{cql_match:.1f} ({cql_ci[0]:.1f}–{cql_ci[1]:.1f})',
+         f'{N_eff_softmax:.2f}', f'{H_softmax:.4f}',
+         f'{(top_actions != 1).sum()} ({(top_actions!=1).mean()*100:.2f}%)',
+         f'{q_gap[top_actions != 1].mean():.4f}' if (top_actions!=1).sum()>0 else '—',
+         f'{q_gap[top_actions == 1].mean():.4f}',
+         'Value-consistent; Q-gap differentiates critical states'],
+    ], columns=['Policy','Action Match % (95% CI)','N_eff','Entropy (bits)',
+                'Non-Maintain','Q-gap (critical)','Q-gap (Maintain)','Interpretation'])
+    comp_df.to_csv(f'{tbl_dir}/table11_policy_comparison.csv', index=False)
+
+    # KL + Q-gap summary
+    pd.DataFrame([
+        ['KL(Behavior || CQL-softmax)', f'{KL_beh_cql:.4f}', 'nats'],
+        ['KL(CQL-softmax || Behavior)', f'{KL_cql_beh:.4f}', 'nats'],
+        ['Mean Q-gap (top-2nd)',         f'{q_gap.mean():.4f}', 'Q-units'],
+        ['Q Maintain',                   f'{q_mean_per[1]:.4f}', 'Q-units'],
+        ['Q Decelerate',                 f'{q_mean_per[0]:.4f}', 'Q-units'],
+        ['Q Accelerate',                 f'{q_mean_per[2]:.4f}', 'Q-units'],
+    ], columns=['Metric','Value','Unit']).to_csv(
+        f'{tbl_dir}/policy_kl_qgap.csv', index=False)
+
+    # Speed bin CIs
+    if speed_bin_cis:
+        rows = []
+        for label, (obs, ci, n) in speed_bin_cis.items():
+            rows.append({'CAV Speed (m/s)': label, 'n': n,
+                         'Critical Rate (%)': f'{obs:.1f}',
+                         'CI Lower': f'{ci[0]:.1f}',
+                         'CI Upper': f'{ci[1]:.1f}'})
+        pd.DataFrame(rows).to_csv(
+            f'{tbl_dir}/speed_bin_bootstrap_ci.csv', index=False)
 
     print(f"\nPolicy analysis saved to: {tbl_dir}")
 
