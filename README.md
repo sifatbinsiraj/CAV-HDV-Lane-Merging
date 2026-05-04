@@ -90,8 +90,7 @@ results/
 
 ## Citation
 
-If you use this code, please cite our paper once published.
-
+This code is part of an ongoing research study. If you find this repository useful for your work, please check back later for citation details once the paper is published.
 ---
 
 ## License
