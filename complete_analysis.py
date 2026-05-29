@@ -6,6 +6,7 @@ Complete Analysis Pipeline — GitHub Release Version
 
 Paper: "Simulation-Free Offline Reinforcement Learning for CAV-HDV Highway
         Merge Safety Using Naturalistic Trajectory Data"
+Journal: 
 Authors: Md Sifat Bin Siraj
 Dataset: TGSIM I-395, Washington D.C. (4.32M records, 2,155 merge events)
 
@@ -71,7 +72,9 @@ PIPELINE STEPS:
     9.  tables          — all paper tables as CSV
     10. policy_analysis — entropy, KL divergence, Q-gap, effective actions,
                           bootstrap CIs, naive baseline comparison
-    11. geographic     — cross-city validation (I-395 D.C. → I-90/I-94 Chicago)
+    11. policy_figures — Figure 19 (confusion matrix) + Figure 20 (precision/recall)
+                          300 DPI, class-wise metrics, balanced accuracy
+    12. geographic     — cross-city validation (I-395 D.C. → I-90/I-94 Chicago)
                           KS tests, policy consistency, safety alignment
 
 REQUIREMENTS:
@@ -166,8 +169,31 @@ PAPER_CQL_CI           = (92.3, 94.5)  # 95% bootstrap CI
 PAPER_C2_BEST_MSE      = 0.0706 # best validation MSE for C2
 PAPER_C2_MEAN_BASELINE = 0.1163 # mean response baseline MSE
 PAPER_C2_VARIANCE_EXP  = 39.3   # % reducible variance explained over mean baseline
-PAPER_ANOVA_F          = 39.28  # ANOVA F-statistic for PET across CAV speed bins
+PAPER_ANOVA_F          = 8.172  # ANOVA F-statistic for PET across CAV speed bins (real data)
 PAPER_ANOVA_P          = 0.001  # ANOVA p-value (< 0.001)
+PAPER_KW_H             = 8.102  # Kruskal-Wallis H for PET across CAV speed bins
+PAPER_KW_P             = 0.044  # Kruskal-Wallis p-value
+PAPER_MERGE_SPEED_P    = 0.018  # uncorrected p for merge speed near vs far CAV
+PAPER_MERGE_SPEED_HOLM = 0.089  # Holm-adjusted p (exploratory)
+# Confusion matrix / classification metrics
+PAPER_N_TEST           = 1930   # held-out test states
+PAPER_N_TRUE_DECEL     = 82     # true Decelerate states in test set
+PAPER_N_TRUE_MAINT     = 1801   # true Maintain states in test set
+PAPER_N_TRUE_ACCEL     = 47     # true Accelerate states in test set
+PAPER_N_PRED_DECEL     = 7      # CQL Decelerate predictions
+PAPER_N_PRED_MAINT     = 1922   # CQL Maintain predictions
+PAPER_N_PRED_ACCEL     = 1      # CQL Accelerate predictions
+PAPER_DECEL_PREC       = 0.714  # Decelerate precision
+PAPER_DECEL_RECALL     = 0.061  # Decelerate recall
+PAPER_MAINT_RECALL     = 0.998  # Maintain recall
+PAPER_MACRO_F1         = 0.359  # macro F1
+PAPER_WEIGHTED_F1      = 0.906  # weighted F1
+PAPER_BALANCED_ACC     = 0.353  # balanced accuracy
+# Geographic validation
+PAPER_GEO_CONSISTENCY  = 93.0   # % policy consistency D.C. → Chicago
+PAPER_GEO_SAFETY_ALIGN = 100.0  # % safety alignment Chicago
+PAPER_GEO_KS_SPEED     = 0.465  # KS statistic speed D.C. vs Chicago
+
 PAPER_KL_BEH_CQL       = 0.1627 # KL(Behavior || CQL-softmax) nats
 PAPER_KL_CQL_BEH       = 0.3024 # KL(CQL-softmax || Behavior) nats
 PAPER_SOFTMAX_ENT      = 0.9825 # CQL soft policy entropy (bits)
@@ -1718,6 +1744,185 @@ def step_figures(df, safety_df, c1_df, ckpt_dir, output_dir):
     print(f"\nAll figures saved to: {fig_dir}")
 
 
+
+# =============================================================================
+# STEP 8b: POLICY EVALUATION FIGURES (Figure 19 & 20)
+# =============================================================================
+
+def step_policy_figures(output_dir):
+    """
+    Generate Figure 19 (Confusion Matrix) and Figure 20 (Precision/Recall)
+    from paper-reported CQL policy evaluation results.
+
+    Based on paper Section 4.9 results:
+        - 1,930 held-out test states
+        - Confusion matrix: TP_D=5, TP_M=1798, TP_A=0
+        - Decel Precision=71.4%, Recall=6.1%, Maintain Recall=99.8%
+        - Balanced Accuracy=35.3%, Macro F1=0.359, Weighted F1=0.906
+    """
+    section("STEP 8b: POLICY EVALUATION FIGURES (Fig 19 & 20)")
+
+    fig_dir = os.path.join(output_dir, 'figures')
+    os.makedirs(fig_dir, exist_ok=True)
+
+    import numpy as np
+
+    # Confusion matrix (paper-consistent, rows=True, cols=Predicted)
+    # Order: Decelerate, Maintain, Accelerate
+    cm = np.array([
+        [5,   77,   0],   # True Decelerate (82 total)
+        [2, 1798,   1],   # True Maintain   (1801 total)
+        [0,   47,   0],   # True Accelerate (47 total)
+    ])
+    labels  = ['Decelerate', 'Maintain', 'Accelerate']
+    support = cm.sum(axis=1)
+    total   = cm.sum()
+
+    tp = np.diag(cm)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+
+    precision = np.where((tp+fp)>0, tp/(tp+fp), 0)
+    recall    = np.where((tp+fn)>0, tp/(tp+fn), 0)
+    f1        = np.where((precision+recall)>0,
+                         2*precision*recall/(precision+recall), 0)
+
+    accuracy      = tp.sum() / total
+    balanced_acc  = recall.mean()
+    macro_f1      = f1.mean()
+    weighted_f1   = np.sum(support * f1) / total
+    safety_f1     = np.sum(np.array([3, 1, 2]) * f1) / 6
+
+    # ---------- FIGURE 19: Confusion Matrix ----------
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), dpi=DPI)
+    fig.patch.set_facecolor('white')
+
+    # (a) Raw counts
+    ax = axes[0]
+    im = ax.imshow(cm, cmap='Blues', aspect='auto')
+    ax.set_xticks(range(3)); ax.set_yticks(range(3))
+    ax.set_xticklabels(labels, fontsize=11)
+    ax.set_yticklabels(labels, fontsize=11)
+    ax.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
+    ax.set_ylabel('True Label',      fontsize=12, fontweight='bold')
+    ax.set_title('(a) Raw Counts\n(CQL Policy on 1,930 Test States)',
+                 fontsize=11, fontweight='bold')
+    for i in range(3):
+        for j in range(3):
+            v   = cm[i, j]
+            pct = v / support[i] * 100
+            col = 'white' if cm[i,j] > cm.max()*0.5 else 'black'
+            ax.text(j, i, f'{v}\n({pct:.1f}%)',
+                    ha='center', va='center',
+                    color=col, fontsize=10, fontweight='bold')
+        ax.add_patch(plt.Rectangle((i-0.5, i-0.5), 1, 1,
+                                    fill=False, edgecolor='darkgreen', linewidth=2.5))
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # (b) Normalized
+    cm_n = cm.astype(float) / support[:, np.newaxis]
+    ax2  = axes[1]
+    im2  = ax2.imshow(cm_n, cmap='Blues', aspect='auto', vmin=0, vmax=1)
+    ax2.set_xticks(range(3)); ax2.set_yticks(range(3))
+    ax2.set_xticklabels(labels, fontsize=11)
+    ax2.set_yticklabels(labels, fontsize=11)
+    ax2.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('True Label',      fontsize=12, fontweight='bold')
+    ax2.set_title('(b) Normalized (Row-wise Recall)',
+                  fontsize=11, fontweight='bold')
+    for i in range(3):
+        for j in range(3):
+            col = 'white' if cm_n[i,j] > 0.5 else 'black'
+            ax2.text(j, i, f'{cm_n[i,j]:.3f}',
+                     ha='center', va='center', color=col,
+                     fontsize=11, fontweight='bold')
+        ax2.add_patch(plt.Rectangle((i-0.5, i-0.5), 1, 1,
+                                     fill=False, edgecolor='darkgreen', linewidth=2.5))
+    plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+
+    # Metrics summary
+    mtext = (
+        f"Accuracy={accuracy*100:.1f}%  Balanced={balanced_acc*100:.1f}%\n"
+        f"Macro F1={macro_f1:.3f}  Weighted F1={weighted_f1:.3f}\n"
+        f"Decel Precision={precision[0]*100:.1f}%  Decel Recall={recall[0]*100:.1f}%"
+    )
+    fig.text(0.5, -0.03, mtext, ha='center', fontsize=9.5, fontfamily='monospace',
+             bbox=dict(boxstyle='round,pad=0.5', facecolor='#F0F8FF',
+                       edgecolor='#2196F3', linewidth=1.5))
+    plt.tight_layout()
+    out19 = f'{fig_dir}/fig19_confusion_matrix.png'
+    plt.savefig(out19, dpi=DPI, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"✓ Fig 19: Confusion Matrix → {out19}")
+
+    # ---------- FIGURE 20: Precision / Recall ----------
+    fig2, axes2 = plt.subplots(1, 2, figsize=(14, 6), dpi=DPI)
+    fig2.patch.set_facecolor('white')
+    fig2.suptitle('CQL Policy: Per-Class Precision, Recall, F1\n'
+                  '(1,930 Test States; TGSIM I-395)',
+                  fontsize=12, fontweight='bold', y=1.01)
+
+    x     = np.arange(3)
+    width = 0.25
+    COLORS = {'Precision': '#2196F3', 'Recall': '#4CAF50', 'F1': '#FF9800'}
+
+    # (a) Per-class bars
+    ax3 = axes2[0]
+    b1 = ax3.bar(x-width, precision, width, label='Precision',
+                 color=COLORS['Precision'], alpha=0.85, edgecolor='white')
+    b2 = ax3.bar(x,        recall,    width, label='Recall',
+                 color=COLORS['Recall'],   alpha=0.85, edgecolor='white')
+    b3 = ax3.bar(x+width,  f1,        width, label='F1',
+                 color=COLORS['F1'],       alpha=0.85, edgecolor='white')
+    for bars in [b1, b2, b3]:
+        for bar in bars:
+            h = bar.get_height()
+            if h > 0.01:
+                ax3.text(bar.get_x()+bar.get_width()/2, h+0.015,
+                         f'{h:.3f}', ha='center', va='bottom', fontsize=8.5, fontweight='bold')
+    ax3.set_xticks(x); ax3.set_xticklabels(labels, fontsize=11)
+    ax3.set_ylabel('Score', fontsize=11); ax3.set_ylim(0, 1.15)
+    ax3.set_title('(a) Per-Class Metrics', fontsize=11, fontweight='bold')
+    ax3.legend(fontsize=10); ax3.spines[['top','right']].set_visible(False)
+    ax3.axhline(0.5, color='gray', linestyle=':', linewidth=0.8, alpha=0.5)
+
+    # (b) Aggregate metrics
+    ax4 = axes2[1]
+    s_labels = ['Accuracy\n(93.4%)', 'Balanced\nAccuracy',
+                'Macro F1', 'Weighted\nF1', 'Safety-wt\nF1']
+    s_vals   = [accuracy, balanced_acc, macro_f1, weighted_f1, safety_f1]
+    s_colors = ['#2196F3','#9C27B0','#FF9800','#4CAF50','#E74C3C']
+    bars4 = ax4.bar(s_labels, s_vals, color=s_colors, alpha=0.85,
+                    edgecolor='white', width=0.6)
+    for bar in bars4:
+        h = bar.get_height()
+        ax4.text(bar.get_x()+bar.get_width()/2, h+0.012,
+                 f'{h:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    ax4.set_ylim(0, 1.15); ax4.set_ylabel('Score', fontsize=11)
+    ax4.set_title('(b) Aggregate Metrics', fontsize=11, fontweight='bold')
+    ax4.spines[['top','right']].set_visible(False)
+    ax4.axhline(0.5, color='gray', linestyle=':', linewidth=0.8, alpha=0.5)
+    ax4.annotate('Balanced accuracy (35.3%)\nreflects Decel class rarity',
+                 xy=(1, balanced_acc), xytext=(2.8, 0.50),
+                 fontsize=8, color='#9C27B0',
+                 arrowprops=dict(arrowstyle='->', color='#9C27B0', lw=1.2))
+
+    plt.tight_layout()
+    out20 = f'{fig_dir}/fig20_precision_recall.png'
+    plt.savefig(out20, dpi=DPI, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"✓ Fig 20: Precision/Recall → {out20}")
+
+    print(f"\nMetrics summary:")
+    for i, lbl in enumerate(labels):
+        print(f"  {lbl}: P={precision[i]:.3f}, R={recall[i]:.3f}, F1={f1[i]:.3f}")
+    print(f"  Accuracy:     {accuracy:.4f}")
+    print(f"  Balanced Acc: {balanced_acc:.4f}")
+    print(f"  Macro F1:     {macro_f1:.4f}")
+    print(f"  Weighted F1:  {weighted_f1:.4f}")
+
+
+
 # =============================================================================
 # STEP 9: TABLES
 # =============================================================================
@@ -1989,6 +2194,10 @@ Examples:
         if c1_df    is None: c1_df    = pd.read_parquet(os.path.join(data_dir,'c1_bayesian_params.parquet'))
         step_tables(df, safety_df, c1_df, ckpt_dir, args.output)
         save_progress(args.output, 'tables')
+
+    if 'policy_figures' in run_steps:
+        step_policy_figures(args.output)
+        save_progress(args.output, 'policy_figures')
 
     if 'geographic' in run_steps:
         chicago_path = os.path.join(
